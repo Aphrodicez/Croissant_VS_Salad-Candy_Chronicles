@@ -1,0 +1,408 @@
+package managers;
+
+import static utilities.Constants.Projectiles.*;
+import static utilities.Constants.Towers.*;
+
+import java.util.ArrayList;
+import java.util.Random;
+
+import entity.enemy.Enemy;
+import entity.tower.Tower;
+import javafx.application.Platform;
+import javafx.geometry.Point2D;
+import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.image.Image;
+import objects.Projectile;
+import scenes.Playing;
+import utilities.ImageFix;
+import utilities.SpritesHolder;
+
+
+ /**
+ * The class Projectile manager
+ */ 
+public class ProjectileManager {
+	
+	/**
+	 * Represent playing class
+	 */
+	private Playing playing;
+	/**
+	 * List of projectiles on screen
+	 */
+	private ArrayList<Projectile> projectiles = new ArrayList<>();
+	/**
+	 * List of explosions on screen
+	 */
+	private ArrayList<Explosion> explosions = new ArrayList<>();
+	/**
+	 * List of projectile's images
+	 */
+	private Image[] projectileImages;
+	/**
+	 * List of explosion's images
+	 */
+	private Image[] explosionImages;
+	/**
+	 * projectiles id counter
+	 */
+	private int projectile_ID = 0;
+	/**
+	 * Initialize fields
+	 * Call importImages
+	 */
+	public ProjectileManager(Playing playing) { 
+
+		this.playing = playing;
+		this.projectile_ID = 0;
+
+		importImages();
+	}
+	/**
+	 * Import images
+	 */
+	private void importImages() { 
+
+		Image atlas = SpritesHolder.getMapSprite();
+		projectileImages = new Image[5];
+
+		for (int i = 0; i < 3; i++) {
+			projectileImages[i] = ImageFix.getSubImage(atlas, 32 * (7 + i), 32 * 1, 32, 32);
+		}
+		
+		projectileImages[3] = ImageFix.getSubImage(atlas, 32 * (7), 32 * 3, 32, 32);
+		projectileImages[4] = ImageFix.getSubImage(atlas, 32 * (8), 32 * 3, 32, 32);
+
+		explosionImages = new Image[7];
+		
+		for(int i = 0; i < 7; i++) {
+			explosionImages[i] = ImageFix.getSubImage(atlas, 32 * i, 32 * 2, 32, 32);
+		}
+		
+	}
+
+	/**
+	 * Create projecties for owner's ultimate
+	 */
+	public void ownerUltimate(Tower tower) { 
+
+
+		int index;
+		int[] typeList = {1,3,4};
+		Random rand = new Random();
+
+		for (int i = -50; i <= 50; i+=4) {
+			index = typeList[rand.nextInt(3)];
+			projectiles.add(new Projectile(tower.getX() + 16, tower.getY() + 16, i, (float) Math.sin(i), 0,
+					tower.getAtk(), projectile_ID++, index));
+			index = typeList[rand.nextInt(3)];
+			projectiles.add(new Projectile(tower.getX() + 16, tower.getY() + 16, (float) Math.sin(i), i, 0,
+					tower.getAtk(), projectile_ID++, index));
+			index = typeList[rand.nextInt(3)];
+			projectiles.add(new Projectile(tower.getX() + 16, tower.getY() + 16, -i, (float) Math.sin(i), 0,
+					tower.getAtk(), projectile_ID++, index));
+			index = typeList[rand.nextInt(3)];
+			projectiles.add(new Projectile(tower.getX() + 16, tower.getY() + 16, -(float) Math.sin(i), i, 0,
+					tower.getAtk(), projectile_ID++, index));
+		}
+
+	}
+
+	/**
+	 * Create new projectile
+	 */
+	public void newProjectile(Tower t, Enemy e, float speedMultiplier) { 
+
+		if (!e.isAlive()) {
+			return;
+		}
+		int type = getProjectileType(t);
+		Projectile p = new Projectile(t.getX() + 16, t.getY() + 16, t.getAtk(), projectile_ID++, type, e);
+		p.setSpeedMultiplier(speedMultiplier);
+		projectiles.add(p);
+	}
+
+	/**
+	 * Move projectiles (Using Thread Playform.runLater)
+	 */
+	public void update() { 
+
+		//System.out.println(projectiles.size());
+		Thread thread = new Thread(() -> {
+			try {
+				Thread.sleep(50);
+				Platform.runLater(new Runnable() {
+					@Override
+
+/** 
+ *
+ * Run
+ *
+ */
+					public void run() { 
+
+						for (Projectile p : projectiles) {
+							if (p.isActive()) {
+								p.move();
+								if (isProjectileHittingEnemy(p)) {
+									if(p.getProjectileType() == CUPCAKE) {
+										explosions.add(new Explosion(p.getPos()));
+										explodeOnEnemies(p);
+									}
+									
+									if(p.getProjectileType() == MACARONS) {
+										playing.getSoundPlayer().shoot();
+									}
+									
+									if(p.getProjectileType() == CROISSANT) {
+										playing.getSoundPlayer().whoosh();
+										p.setEnemy(null);
+										p.setSpeedMultiplier((float)-1.25);
+									}
+									else {
+										p.setActive(false);
+									}
+								}
+								else if(isProjectileOutOfBounds(p)) {
+									p.setActive(false);
+								}
+							}
+						}
+						for(Explosion e : explosions) {
+							e.update();
+						}
+					}
+				});
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		});
+		thread.start();
+
+	}
+	
+	/**
+	 * Return if a projectile is out of bounds
+	 */
+	private boolean isProjectileOutOfBounds(Projectile p) { 
+
+		return !(p.getPos().getX() >= 0 && p.getPos().getX() < 640 && p.getPos().getY() >= 0 && p.getPos().getX() < 640);
+	}
+
+	/**
+	 * Deal AOE damage
+	 */
+	private void explodeOnEnemies(Projectile p) { 
+
+		playing.getSoundPlayer().boom();
+		for(Enemy e : playing.getEnemyManager().getEnemies()) {
+			if(!e.isAlive()) {
+				continue ;
+			}
+			float radius = 40.0f;
+			float xDist = (float)Math.abs(p.getPos().getX() - e.getX());
+			float yDist = (float)Math.abs(p.getPos().getY() - e.getY());
+			
+			float realDist = (float) Math.hypot(xDist, yDist);
+			
+			if(realDist <= radius) {
+				e.hurt(p.getDamage());
+			}
+		}
+	}
+	/**
+	 * Draw Explosions
+	 */
+	private void drawExplosions(GraphicsContext gc) { 
+
+		for(int i = explosions.size() - 1; i >= 0; i--) {
+			if(explosions.get(i).getExplosionIndex() >= 7) {
+				explosions.remove(i);
+			}
+		}
+		for(Explosion e : explosions) {
+			if(e.getExplosionIndex() < 7) {
+				gc.drawImage(explosionImages[e.getExplosionIndex()], (int)e.getPos().getX() - (32 / 2), (int)e.getPos().getY() - (32 / 2));
+			}
+		}
+	}
+	/**
+	 * Return if projectile is hitting enemies
+	 */
+	private boolean isProjectileHittingEnemy(Projectile p) { 
+
+		for (Enemy e : playing.getEnemyManager().getEnemies()) {
+			if(!e.isAlive()) {
+				continue ;
+			}
+			if (e.getBounds().contains(p.getPos())) {
+				if(p.getLastEnemy() == e) {
+					return false;
+				}
+				e.hurt(p.getDamage());
+				if (!e.isAlive()) {
+					p.setEnemy(null);
+					playing.rewardPlayer(e.getEnemyType());
+					
+					playing.getEnemyManager().getEnemies().remove(e);
+
+				}
+				else {
+					if(p.getProjectileType() == MACARONS) {
+						e.slow();
+					}
+				}
+				p.setLastEnemy(e);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Draw projectiles (Using Thread Platform.runLater)
+	 */
+	public void draw(GraphicsContext gc) { 
+
+
+		Thread thread = new Thread(() -> {
+			try {
+				Thread.sleep(10);
+				Platform.runLater(new Runnable() {
+					@Override
+
+/** 
+ *
+ * Run
+ *
+ */
+					public void run() { 
+
+						for (int i = projectiles.size() - 1; i >= 0; i--) {
+							Projectile p = projectiles.get(i);
+							if (!p.isActive()) {
+								projectiles.remove(i);
+							}
+						}
+					}
+				});
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		});
+		thread.start();
+
+		for (Projectile p : projectiles) {
+			if (!p.isActive()) {
+				continue;
+			}
+			
+			gc.drawImage(projectileImages[p.getProjectileType()], (int)p.getPos().getX() - (32 / 2), (int)p.getPos().getY() - (32 / 2));
+		}
+		drawExplosions(gc);
+	}
+
+	/**
+	 * Get tower's projectile type
+	 */
+	private int getProjectileType(Tower tower) { 
+
+		switch (tower.getTowerType()) {
+		case CHEF:
+			return CROISSANT;
+		case PRINCESS:
+			return CUPCAKE;
+		case OWNER:
+			return MACARONS;
+		}
+		return 0;
+	}
+	
+	/**
+	 * Inside class just for explosions
+	 */
+	public class Explosion {
+		
+		/**
+		 * Explosion's position
+		 */
+		private Point2D pos;
+		/**
+		 * Last time since this explosion
+		 */
+		private int explosionTick = 0;
+		/**
+		 * This explosion's index
+		 */
+		private int explosionIndex = 0;
+		/**
+		 * Initialize fields
+		 */
+		public Explosion(Point2D pos) { 
+
+			this.pos = pos;
+		}
+		/**
+		 * Update explosionTick and explosionIndex (Using thread)
+		 */
+		public void update() { 
+
+			Thread thread = new Thread(() -> {
+				explosionTick++;
+				if(explosionTick >= 4) {
+					explosionTick = 0;
+					explosionIndex++;
+				}
+			});
+			thread.start();
+		}
+		/**
+		 * Get explosion's position
+		 */
+		public Point2D getPos() { 
+
+			return pos;
+		}
+		/**
+		 * Get last time since this explosion
+		 */
+		public int getExplosionTick() { 
+
+			return explosionTick;
+		}
+		/**
+		 * Get this explosion's index
+		 */
+		public int getExplosionIndex() { 
+
+			return explosionIndex;
+		}
+	}
+
+	/**
+	 * Clear list of projectiiles and explosions
+	 * reset projectile_ID
+	 */
+	public void reset() { 
+
+		projectiles.clear();
+		explosions.clear();
+
+		projectile_ID = 0;
+	}
+
+	/**
+	 * Create projecties for princess's ultimate
+	 */
+	public void princessUltimate(Tower tower) { 
+
+		for(int i = 0; i <= 90; i += 30) {
+			projectiles.add(new Projectile(tower.getX() + 16, tower.getY() + 16, (float)Math.cos(Math.toRadians(i)), (float)Math.sin(Math.toRadians(i)), (float)0.0,
+					tower.getAtk(), projectile_ID++, 2));
+		}
+		for(int i = 180; i <= 270; i += 30) {
+			projectiles.add(new Projectile(tower.getX() + 16, tower.getY() + 16, (float)Math.cos(Math.toRadians(i)), (float)Math.sin(Math.toRadians(i)), (float)0.0,
+					tower.getAtk(), projectile_ID++, 2));
+		}
+	}
+}
